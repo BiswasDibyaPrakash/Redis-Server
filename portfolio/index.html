@@ -1,0 +1,1834 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Custom Redis Server // In-Memory Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   CSS CUSTOM PROPERTIES
+   ============================================================ */
+:root {
+  --bg-primary: #0a0812;
+  --bg-deep: #050508;
+  --bg-card: #0d0b16;
+  --bg-card-hover: #110e1c;
+  --purple-100: #d8b4fe;
+  --purple-200: #c084fc;
+  --purple-300: #a855f7;
+  --purple-400: #8b5cf6;
+  --purple-500: #7c3aed;
+  --purple-600: #6d28d9;
+  --purple-700: #5b21b6;
+  --green-term: #4ade80;
+  --red-term: #f87171;
+  --yellow-term: #fbbf24;
+  --blue-term: #60a5fa;
+  --text-primary: #e2d9f3;
+  --text-dim: #9585b0;
+  --text-code: #c4b5fd;
+  --font-pixel: 'Press Start 2P', monospace;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --glow-sm: 0 0 10px rgba(139,92,246,0.25);
+  --glow-md: 0 0 20px rgba(139,92,246,0.3), 0 0 40px rgba(139,92,246,0.1);
+  --glow-lg: 0 0 30px rgba(168,85,247,0.4), 0 0 60px rgba(139,92,246,0.15);
+  --border-glow: 0 0 15px rgba(168,85,247,0.3);
+}
+
+/* ============================================================
+   RESET & BASE
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.7;
+  overflow-x: hidden;
+}
+::selection { background: var(--purple-400); color: #fff; }
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: var(--bg-deep); }
+::-webkit-scrollbar-thumb { background: var(--purple-600); border: 1px solid var(--purple-400); }
+
+/* ============================================================
+   NAVIGATION
+   ============================================================ */
+.nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+  background: rgba(5,5,8,0.92);
+  border-bottom: 2px solid var(--purple-600);
+  backdrop-filter: blur(10px);
+  padding: 0 2rem;
+  display: flex; align-items: center; justify-content: space-between;
+  height: 56px;
+  box-shadow: 0 2px 20px rgba(139,92,246,0.15);
+}
+.nav-logo {
+  font-family: var(--font-pixel);
+  font-size: 11px;
+  color: var(--purple-200);
+  text-shadow: 0 0 10px rgba(192,132,252,0.5);
+  letter-spacing: 1px;
+}
+.nav-logo span { color: var(--purple-400); }
+.nav-links { display: flex; gap: 1.5rem; list-style: none; }
+.nav-links a {
+  font-family: var(--font-pixel);
+  font-size: 8px;
+  color: var(--text-dim);
+  text-decoration: none;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  transition: all 0.2s;
+  letter-spacing: 0.5px;
+}
+.nav-links a:hover {
+  color: var(--purple-200);
+  border-color: var(--purple-400);
+  text-shadow: 0 0 8px rgba(168,85,247,0.5);
+  box-shadow: var(--glow-sm);
+}
+.nav-hamburger {
+  display: none; cursor: pointer; background: none; border: 2px solid var(--purple-600);
+  padding: 6px 8px; color: var(--purple-200); font-family: var(--font-pixel); font-size: 10px;
+}
+
+/* ============================================================
+   HERO SECTION
+   ============================================================ */
+.hero {
+  position: relative;
+  min-height: 100vh;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center;
+  padding: 80px 2rem 4rem;
+  overflow: hidden;
+}
+.hero-canvas {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  z-index: 0; pointer-events: none;
+}
+/* CRT scanline overlay */
+.hero::after {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(139,92,246,0.03) 2px,
+    rgba(139,92,246,0.03) 4px
+  );
+  pointer-events: none; z-index: 1;
+}
+.hero-content { position: relative; z-index: 2; max-width: 900px; }
+.hero-badge {
+  display: inline-block;
+  font-family: var(--font-pixel);
+  font-size: 8px;
+  color: var(--purple-300);
+  border: 2px solid var(--purple-500);
+  padding: 6px 14px;
+  margin-bottom: 2rem;
+  text-shadow: 0 0 10px rgba(168,85,247,0.4);
+  box-shadow: var(--glow-sm);
+  animation: pulse-border 3s ease-in-out infinite;
+}
+.hero h1 {
+  font-family: var(--font-pixel);
+  font-size: clamp(18px, 3.5vw, 32px);
+  line-height: 1.8;
+  color: #fff;
+  text-shadow: 0 0 20px rgba(139,92,246,0.6), 0 0 40px rgba(168,85,247,0.3);
+  margin-bottom: 0.5rem;
+}
+.hero h1 .accent { color: var(--purple-200); }
+.hero-subtitle {
+  font-family: var(--font-mono);
+  font-size: clamp(11px, 1.5vw, 14px);
+  color: var(--text-dim);
+  margin: 1.5rem 0 2rem;
+  letter-spacing: 0.5px;
+}
+.hero-subtitle span { color: var(--purple-300); }
+
+/* Hero stat boxes */
+.hero-stats {
+  display: flex; flex-wrap: wrap; gap: 10px;
+  justify-content: center;
+  margin-bottom: 2.5rem;
+}
+.hero-stat {
+  font-family: var(--font-pixel);
+  font-size: 7px;
+  color: var(--purple-100);
+  background: rgba(139,92,246,0.08);
+  border: 1px solid var(--purple-600);
+  padding: 8px 12px;
+  letter-spacing: 0.5px;
+  text-shadow: 0 0 6px rgba(216,180,254,0.3);
+}
+
+/* CTA buttons */
+.hero-buttons { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+.btn-pixel {
+  font-family: var(--font-pixel);
+  font-size: 9px;
+  padding: 14px 24px;
+  border: 2px solid var(--purple-400);
+  background: transparent;
+  color: var(--purple-100);
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.2s;
+  text-shadow: 0 0 8px rgba(216,180,254,0.3);
+  box-shadow: var(--border-glow);
+  letter-spacing: 0.5px;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.btn-pixel:hover {
+  background: rgba(139,92,246,0.15);
+  box-shadow: var(--glow-md);
+  transform: translateY(-2px);
+  color: #fff;
+}
+.btn-pixel.primary {
+  background: rgba(139,92,246,0.2);
+  border-color: var(--purple-300);
+}
+
+/* ============================================================
+   SECTION SHARED STYLES
+   ============================================================ */
+.section {
+  padding: 5rem 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.section-title {
+  font-family: var(--font-pixel);
+  font-size: clamp(11px, 2vw, 15px);
+  color: var(--purple-200);
+  text-shadow: 0 0 15px rgba(192,132,252,0.4);
+  margin-bottom: 0.8rem;
+}
+.section-subtitle {
+  color: var(--text-dim);
+  font-size: 13px;
+  margin-bottom: 3rem;
+  max-width: 600px;
+}
+.section-divider {
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--purple-600), var(--purple-400), var(--purple-600), transparent);
+  margin: 0 auto;
+  box-shadow: 0 0 10px rgba(139,92,246,0.3);
+}
+
+/* ============================================================
+   DATA STRUCTURE CARDS (RPG STAT GRID)
+   ============================================================ */
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 1.5rem;
+}
+.ds-card {
+  background: var(--bg-card);
+  border: 2px solid var(--purple-700);
+  padding: 0;
+  cursor: pointer;
+  transition: all 0.25s;
+  box-shadow: var(--glow-sm);
+  position: relative;
+  overflow: hidden;
+}
+.ds-card::before {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--card-accent, var(--purple-400));
+  box-shadow: 0 0 15px var(--card-accent, var(--purple-400));
+}
+.ds-card:hover {
+  border-color: var(--card-accent, var(--purple-400));
+  box-shadow: var(--glow-md);
+  transform: translateY(-4px);
+  background: var(--bg-card-hover);
+}
+.ds-card-header {
+  padding: 1.25rem 1.5rem;
+  display: flex; align-items: center; gap: 1rem;
+}
+.ds-card-icon {
+  font-size: 24px;
+  width: 48px; height: 48px;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid var(--card-accent, var(--purple-400));
+  background: rgba(139,92,246,0.08);
+  color: var(--card-accent, var(--purple-200));
+  text-shadow: 0 0 10px var(--card-accent, rgba(168,85,247,0.5));
+  flex-shrink: 0;
+}
+.ds-card-title {
+  font-family: var(--font-pixel);
+  font-size: 10px;
+  color: var(--purple-100);
+  text-shadow: 0 0 8px rgba(216,180,254,0.3);
+}
+.ds-card-folder {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+.ds-card-badges {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 0 1.5rem 1rem;
+}
+.complexity-badge {
+  font-family: var(--font-pixel);
+  font-size: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--card-accent, var(--purple-500));
+  color: var(--card-accent, var(--purple-200));
+  background: rgba(139,92,246,0.06);
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+.ds-card:hover .complexity-badge {
+  box-shadow: 0 0 8px rgba(139,92,246,0.3);
+  text-shadow: 0 0 6px var(--card-accent, rgba(168,85,247,0.4));
+}
+.ds-card-desc {
+  padding: 0 1.5rem 1rem;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+.ds-card-desc strong { color: var(--purple-200); font-weight: 500; }
+.ds-card-expand-hint {
+  padding: 0.6rem 1.5rem;
+  font-family: var(--font-pixel);
+  font-size: 7px;
+  color: var(--purple-500);
+  border-top: 1px solid rgba(139,92,246,0.1);
+  text-align: center;
+  transition: color 0.2s;
+}
+.ds-card:hover .ds-card-expand-hint { color: var(--purple-300); }
+.ds-card-code {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.4s ease, padding 0.3s ease;
+  background: var(--bg-deep);
+  border-top: 1px solid rgba(139,92,246,0.15);
+}
+.ds-card.expanded .ds-card-code {
+  max-height: 500px;
+  padding: 1rem 1.25rem;
+}
+.ds-card.expanded .ds-card-expand-hint::after { content: ' ▲'; }
+.ds-card:not(.expanded) .ds-card-expand-hint::after { content: ' ▼'; }
+.ds-card-code pre {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-code);
+  overflow-x: auto;
+  white-space: pre;
+}
+.ds-card-code .kw { color: var(--purple-200); font-weight: 700; }
+.ds-card-code .type { color: var(--purple-300); }
+.ds-card-code .comment { color: #6b7280; font-style: italic; }
+.ds-card-code .str { color: var(--purple-100); }
+.ds-card-code .num { color: var(--yellow-term); }
+.ds-card-code .fn { color: var(--green-term); }
+.ds-card-code .macro { color: var(--red-term); }
+
+/* Scroll animation */
+.ds-card { opacity: 0; transform: translateY(30px); transition: all 0.4s ease; }
+.ds-card.visible { opacity: 1; transform: translateY(0); }
+.ds-card.visible:hover { transform: translateY(-4px); }
+
+/* ============================================================
+   TERMINAL EMULATOR
+   ============================================================ */
+.terminal-section {
+  padding: 5rem 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.terminal-layout {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 1.5rem;
+  align-items: start;
+}
+.terminal-container {
+  border: 2px solid var(--purple-500);
+  box-shadow: var(--glow-md);
+  background: var(--bg-deep);
+  overflow: hidden;
+}
+.terminal-titlebar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px;
+  background: rgba(139,92,246,0.1);
+  border-bottom: 2px solid var(--purple-600);
+  font-family: var(--font-pixel);
+  font-size: 8px;
+  color: var(--purple-200);
+}
+.terminal-dot {
+  width: 10px; height: 10px;
+  border: 2px solid;
+  display: inline-block;
+}
+.terminal-dot.red { border-color: #f87171; }
+.terminal-dot.yellow { border-color: #fbbf24; }
+.terminal-dot.green { border-color: #4ade80; }
+.terminal-body {
+  height: 420px;
+  overflow-y: auto;
+  padding: 1rem;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.terminal-body::-webkit-scrollbar { width: 6px; }
+.terminal-body::-webkit-scrollbar-thumb { background: var(--purple-700); }
+.terminal-output-line { margin-bottom: 2px; white-space: pre-wrap; word-break: break-all; }
+.terminal-output-line.cmd { color: var(--green-term); }
+.terminal-output-line.result { color: var(--purple-100); }
+.terminal-output-line.error { color: var(--red-term); }
+.terminal-output-line.info { color: var(--blue-term); }
+.terminal-output-line.system { color: var(--text-dim); font-style: italic; }
+.terminal-input-line {
+  display: flex; align-items: center;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  margin-top: 4px;
+}
+.terminal-prompt { color: var(--green-term); white-space: pre; user-select: none; }
+.terminal-input {
+  flex: 1;
+  background: none; border: none; outline: none;
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  caret-color: var(--green-term);
+}
+
+/* Command reference sidebar */
+.cmd-reference {
+  border: 2px solid var(--purple-700);
+  background: var(--bg-card);
+  padding: 1rem;
+  box-shadow: var(--glow-sm);
+  max-height: 520px;
+  overflow-y: auto;
+}
+.cmd-reference h3 {
+  font-family: var(--font-pixel);
+  font-size: 8px;
+  color: var(--purple-200);
+  margin-bottom: 1rem;
+  text-shadow: 0 0 8px rgba(192,132,252,0.3);
+}
+.cmd-ref-item {
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(139,92,246,0.1);
+}
+.cmd-ref-cmd {
+  font-family: var(--font-pixel);
+  font-size: 7px;
+  color: var(--purple-100);
+  margin-bottom: 2px;
+}
+.cmd-ref-desc {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+/* ============================================================
+   EVENT LOOP VISUALIZER
+   ============================================================ */
+.visualizer-section {
+  padding: 5rem 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.viz-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+}
+/* Architecture Diagram */
+.arch-diagram {
+  border: 2px solid var(--purple-700);
+  background: var(--bg-card);
+  padding: 2rem;
+  box-shadow: var(--glow-sm);
+  position: relative;
+}
+.arch-col {
+  display: flex; flex-direction: column; gap: 1rem;
+  align-items: center;
+}
+.arch-row {
+  display: flex; gap: 1.5rem;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  width: 100%;
+}
+.arch-box {
+  font-family: var(--font-pixel);
+  font-size: 7px;
+  padding: 12px 16px;
+  border: 2px solid var(--purple-600);
+  background: rgba(139,92,246,0.06);
+  color: var(--purple-100);
+  text-align: center;
+  min-width: 100px;
+  position: relative;
+  transition: all 0.3s;
+  text-shadow: 0 0 6px rgba(216,180,254,0.2);
+}
+.arch-box.active {
+  border-color: var(--purple-300);
+  box-shadow: var(--glow-md);
+  background: rgba(139,92,246,0.12);
+}
+.arch-box.core {
+  border-color: var(--purple-400);
+  background: rgba(139,92,246,0.15);
+  box-shadow: var(--glow-md);
+  animation: pulse-glow 2.5s ease-in-out infinite;
+  padding: 16px 20px;
+  font-size: 8px;
+}
+.arch-box-sub {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+.arch-arrow {
+  color: var(--purple-500);
+  font-size: 18px;
+  animation: flow-arrow 1.5s ease-in-out infinite;
+  user-select: none;
+}
+.arch-arrow.down { display: block; text-align: center; }
+.arch-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-dim);
+  text-align: center;
+  margin: 0.5rem 0;
+}
+
+/* Timeline */
+.timeline-panel {
+  border: 2px solid var(--purple-700);
+  background: var(--bg-card);
+  padding: 1.5rem;
+  box-shadow: var(--glow-sm);
+}
+.timeline-panel h3 {
+  font-family: var(--font-pixel);
+  font-size: 9px;
+  color: var(--purple-200);
+  margin-bottom: 1.5rem;
+  text-shadow: 0 0 8px rgba(192,132,252,0.3);
+}
+.timeline-step {
+  display: flex; align-items: flex-start; gap: 1rem;
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid rgba(139,92,246,0.15);
+  background: rgba(139,92,246,0.03);
+  transition: all 0.4s;
+  position: relative;
+}
+.timeline-step.active {
+  border-color: var(--purple-400);
+  background: rgba(139,92,246,0.1);
+  box-shadow: var(--glow-sm);
+}
+.timeline-step-num {
+  font-family: var(--font-pixel);
+  font-size: 10px;
+  color: var(--purple-400);
+  min-width: 24px;
+  text-align: center;
+  line-height: 1;
+  padding-top: 2px;
+}
+.timeline-step.active .timeline-step-num { color: var(--purple-200); text-shadow: 0 0 8px rgba(192,132,252,0.5); }
+.timeline-step-content h4 {
+  font-family: var(--font-pixel);
+  font-size: 7px;
+  color: var(--purple-100);
+  margin-bottom: 4px;
+}
+.timeline-step-content p {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+/* Legend */
+.viz-legend {
+  margin-top: 1.5rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.legend-dot {
+  width: 8px; height: 8px;
+  border: 2px solid;
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   BUILD & METRICS
+   ============================================================ */
+.build-section {
+  padding: 5rem 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.build-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+}
+.build-terminal {
+  border: 2px solid var(--purple-700);
+  background: var(--bg-deep);
+  box-shadow: var(--glow-sm);
+  overflow: hidden;
+}
+.build-terminal-header {
+  padding: 8px 14px;
+  background: rgba(139,92,246,0.1);
+  border-bottom: 2px solid var(--purple-700);
+  font-family: var(--font-pixel);
+  font-size: 7px;
+  color: var(--purple-300);
+}
+.build-terminal-body {
+  padding: 1.25rem;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.8;
+  max-height: 520px;
+  overflow-y: auto;
+}
+.build-terminal-body .prompt { color: var(--green-term); }
+.build-terminal-body .cmd-text { color: #fff; }
+.build-terminal-body .output { color: var(--text-dim); }
+.build-terminal-body .highlight { color: var(--purple-200); }
+.build-terminal-body .comment { color: #6b7280; }
+
+/* Metrics panel */
+.metrics-panel {
+  border: 2px solid var(--purple-700);
+  background: var(--bg-card);
+  padding: 1.5rem;
+  box-shadow: var(--glow-sm);
+}
+.metrics-panel h3 {
+  font-family: var(--font-pixel);
+  font-size: 9px;
+  color: var(--purple-200);
+  margin-bottom: 1.5rem;
+  text-shadow: 0 0 8px rgba(192,132,252,0.3);
+}
+.metric-row {
+  margin-bottom: 1.25rem;
+}
+.metric-label {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 6px;
+}
+.metric-label span:first-child {
+  font-family: var(--font-pixel);
+  font-size: 7px;
+  color: var(--purple-100);
+}
+.metric-label span:last-child {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.metric-bar {
+  height: 12px;
+  background: rgba(139,92,246,0.1);
+  border: 1px solid var(--purple-700);
+  overflow: hidden;
+  position: relative;
+}
+.metric-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--purple-500), var(--purple-300));
+  box-shadow: 0 0 10px rgba(168,85,247,0.4);
+  width: 0;
+  transition: width 1.5s ease;
+}
+
+/* File tree */
+.file-tree {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid rgba(139,92,246,0.15);
+}
+.file-tree h4 {
+  font-family: var(--font-pixel);
+  font-size: 8px;
+  color: var(--purple-200);
+  margin-bottom: 1rem;
+}
+.tree-item {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  padding: 2px 0 2px 0;
+  display: flex; align-items: center; gap: 6px;
+}
+.tree-item .icon { color: var(--purple-300); font-size: 12px; }
+.tree-item.dir .icon { color: var(--yellow-term); }
+.tree-item.indent-1 { padding-left: 1.2rem; }
+.tree-item.indent-2 { padding-left: 2.4rem; }
+
+/* ============================================================
+   FOOTER
+   ============================================================ */
+.footer {
+  border-top: 2px solid var(--purple-700);
+  padding: 3rem 2rem;
+  text-align: center;
+  background: var(--bg-deep);
+}
+.footer-title {
+  font-family: var(--font-pixel);
+  font-size: 10px;
+  color: var(--purple-300);
+  text-shadow: 0 0 15px rgba(168,85,247,0.4);
+  margin-bottom: 1rem;
+}
+.footer-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 1.5rem;
+}
+.footer-blink {
+  font-family: var(--font-pixel);
+  font-size: 8px;
+  color: var(--purple-400);
+  animation: blink-text 1.2s step-end infinite;
+}
+
+/* ============================================================
+   ANIMATIONS
+   ============================================================ */
+@keyframes pulse-border {
+  0%, 100% { box-shadow: var(--glow-sm); }
+  50% { box-shadow: var(--glow-md); }
+}
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 15px rgba(139,92,246,0.3); }
+  50% { box-shadow: 0 0 30px rgba(139,92,246,0.5), 0 0 60px rgba(168,85,247,0.2); }
+}
+@keyframes flow-arrow {
+  0%, 100% { opacity: 0.4; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(3px); }
+}
+@keyframes blink-text {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+@keyframes typewriter-cursor {
+  0%, 100% { border-color: var(--green-term); }
+  50% { border-color: transparent; }
+}
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes scan-line {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width: 900px) {
+  .terminal-layout { grid-template-columns: 1fr; }
+  .cmd-reference { display: none; }
+  .viz-container { grid-template-columns: 1fr; }
+  .build-grid { grid-template-columns: 1fr; }
+  .cards-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .nav-links { display: none; }
+  .nav-hamburger { display: block; }
+  .nav-links.open {
+    display: flex; flex-direction: column;
+    position: absolute; top: 56px; left: 0; right: 0;
+    background: rgba(5,5,8,0.97);
+    border-bottom: 2px solid var(--purple-600);
+    padding: 1rem;
+  }
+  .hero h1 { font-size: 16px; }
+  .hero-stats { gap: 6px; }
+  .hero-stat { font-size: 6px; padding: 5px 8px; }
+  .section { padding: 3rem 1rem; }
+  .arch-row { flex-direction: column; gap: 0.75rem; }
+}
+</style>
+</head>
+<body>
+
+<!-- ======== NAVIGATION ======== -->
+<nav class="nav">
+  <div class="nav-logo">&gt;&gt; <span>REDIS</span>.EXE</div>
+  <button class="nav-hamburger" onclick="document.querySelector('.nav-links').classList.toggle('open')">☰ MENU</button>
+  <ul class="nav-links">
+    <li><a href="#hero">HOME</a></li>
+    <li><a href="#modules">MODULES</a></li>
+    <li><a href="#terminal">TERMINAL</a></li>
+    <li><a href="#visualizer">CONCURRENCY</a></li>
+    <li><a href="#build">BUILD</a></li>
+  </ul>
+</nav>
+
+<!-- ======== HERO ======== -->
+<section class="hero" id="hero">
+  <canvas class="hero-canvas" id="particleCanvas"></canvas>
+  <div class="hero-content">
+    <div class="hero-badge">▶ HIGH-PERFORMANCE IN-MEMORY DATABASE ◀</div>
+    <h1>
+      CUSTOM REDIS SERVER<br>
+      <span class="accent">// IN-MEMORY ENGINE</span>
+    </h1>
+    <p class="hero-subtitle">
+      Built from scratch in C++ <span>•</span> Zero-dependency core data structures <span>•</span> Event-driven I/O
+    </p>
+    <div class="hero-stats">
+      <div class="hero-stat">6 DATA STRUCTS</div>
+      <div class="hero-stat">O(1) LOOKUPS</div>
+      <div class="hero-stat">POLL() EVENT LOOP</div>
+      <div class="hero-stat">ZERO DEPS</div>
+      <div class="hero-stat">C++17</div>
+      <div class="hero-stat">PTHREAD POOL</div>
+    </div>
+    <div class="hero-buttons">
+      <a href="#terminal" class="btn-pixel primary">&gt;&gt; RUN TERMINAL</a>
+      <a href="#modules" class="btn-pixel">&gt;&gt; ARCHITECTURE</a>
+    </div>
+  </div>
+</section>
+
+<div class="section-divider"></div>
+
+<!-- ======== DATA STRUCTURE MODULES ======== -->
+<section class="section" id="modules">
+  <h2 class="section-title">// DATA STRUCTURE MODULES</h2>
+  <p class="section-subtitle">Each module is a hand-crafted C++ data structure. Click any card to inspect the source.</p>
+
+  <div class="cards-grid">
+
+    <!-- HASHTABLE -->
+    <div class="ds-card" style="--card-accent: #a855f7" onclick="this.classList.toggle('expanded')">
+      <div class="ds-card-header">
+        <div class="ds-card-icon">⊞</div>
+        <div>
+          <div class="ds-card-title">HASHTABLE</div>
+          <div class="ds-card-folder">hashtable/</div>
+        </div>
+      </div>
+      <div class="ds-card-badges">
+        <span class="complexity-badge">INSERT O(1)</span>
+        <span class="complexity-badge">LOOKUP O(1)</span>
+        <span class="complexity-badge">DELETE O(1)</span>
+      </div>
+      <div class="ds-card-desc">
+        <strong>Progressive Resizing</strong> — two HTable instances for incremental rehashing. Avoids full-stop rehash freezes. FNV hash function with avalanche mixing.
+      </div>
+      <div class="ds-card-expand-hint">INSPECT SOURCE</div>
+      <div class="ds-card-code"><pre><span class="kw">struct</span> <span class="type">HNode</span> {
+    <span class="type">HNode</span> *next = <span class="num">NULL</span>;
+    <span class="type">uint64_t</span> hcode = <span class="num">0</span>; <span class="comment">// hash value of each node</span>
+};
+
+<span class="kw">struct</span> <span class="type">HTable</span> {
+    <span class="type">HNode</span> **tab = <span class="num">NULL</span>;  <span class="comment">// array of buckets</span>
+    <span class="type">size_t</span> mask = <span class="num">0</span>;     <span class="comment">// 2^n - 1</span>
+    <span class="type">size_t</span> size = <span class="num">0</span>;     <span class="comment">// keys stored</span>
+};
+
+<span class="kw">struct</span> <span class="type">HMap</span> {
+    <span class="type">HTable</span> newer;
+    <span class="type">HTable</span> older;
+    <span class="type">size_t</span> migratePos = <span class="num">0</span>; <span class="comment">// progressive rehash cursor</span>
+};
+
+<span class="type">HNode</span> *<span class="fn">hmLookup</span>(<span class="type">HMap</span> *hmap, <span class="type">HNode</span> *key, <span class="type">bool</span> (*eq)(<span class="type">HNode</span>*, <span class="type">HNode</span>*));
+<span class="kw">void</span>   <span class="fn">hmInsert</span>(<span class="type">HMap</span> *hmap, <span class="type">HNode</span> *node);
+<span class="type">HNode</span> *<span class="fn">hmDelete</span>(<span class="type">HMap</span> *hmap, <span class="type">HNode</span> *key, <span class="type">bool</span> (*eq)(<span class="type">HNode</span>*, <span class="type">HNode</span>*));</pre></div>
+    </div>
+
+    <!-- AVL TREE -->
+    <div class="ds-card" style="--card-accent: #8b5cf6" onclick="this.classList.toggle('expanded')">
+      <div class="ds-card-header">
+        <div class="ds-card-icon">⟨⟩</div>
+        <div>
+          <div class="ds-card-title">AVL TREE</div>
+          <div class="ds-card-folder">AVLtrees/</div>
+        </div>
+      </div>
+      <div class="ds-card-badges">
+        <span class="complexity-badge">INSERT O(log N)</span>
+        <span class="complexity-badge">SEARCH O(log N)</span>
+        <span class="complexity-badge">RANK O(log N)</span>
+      </div>
+      <div class="ds-card-desc">
+        <strong>Zero-Allocation Intrusive BST</strong> — embeds AVLNode into ZNode via container_of macro. Branchless pointer-to-pointer rewiring. Identity-theft deletion strategy.
+      </div>
+      <div class="ds-card-expand-hint">INSPECT SOURCE</div>
+      <div class="ds-card-code"><pre><span class="kw">struct</span> <span class="type">AVLNode</span> {
+    <span class="type">AVLNode</span> *parent = <span class="num">NULL</span>;
+    <span class="type">AVLNode</span> *left   = <span class="num">NULL</span>;
+    <span class="type">AVLNode</span> *right  = <span class="num">NULL</span>;
+    <span class="type">uint32_t</span> height = <span class="num">0</span>; <span class="comment">// height of subtree</span>
+    <span class="type">uint32_t</span> cnt    = <span class="num">0</span>; <span class="comment">// subtree size for rank</span>
+};
+
+<span class="kw">inline</span> <span class="kw">void</span> <span class="fn">avlInit</span>(<span class="type">AVLNode</span> *node) {
+    node-&gt;left = node-&gt;right = node-&gt;parent = <span class="num">NULL</span>;
+    node-&gt;height = <span class="num">1</span>;
+    node-&gt;cnt = <span class="num">1</span>;
+}
+
+<span class="type">AVLNode</span> *<span class="fn">avlFix</span>(<span class="type">AVLNode</span> *node);    <span class="comment">// rebalance up to root</span>
+<span class="type">AVLNode</span> *<span class="fn">avlDel</span>(<span class="type">AVLNode</span> *node);    <span class="comment">// detach + rebalance</span>
+<span class="type">AVLNode</span> *<span class="fn">avl_offset</span>(<span class="type">AVLNode</span> *node, <span class="type">int64_t</span> offset);
+<span class="type">int64_t</span>  <span class="fn">avlRank</span>(<span class="type">AVLNode</span> *node); <span class="comment">// 1-based rank</span></pre></div>
+    </div>
+
+    <!-- ZSET -->
+    <div class="ds-card" style="--card-accent: #c084fc" onclick="this.classList.toggle('expanded')">
+      <div class="ds-card-header">
+        <div class="ds-card-icon">★</div>
+        <div>
+          <div class="ds-card-title">ZSET (SORTED SET)</div>
+          <div class="ds-card-folder">zset/</div>
+        </div>
+      </div>
+      <div class="ds-card-badges">
+        <span class="complexity-badge">ZADD O(log N)</span>
+        <span class="complexity-badge">ZRANK O(log N)</span>
+        <span class="complexity-badge">ZQUERY O(log N + K)</span>
+      </div>
+      <div class="ds-card-desc">
+        <strong>Hybrid AVL + HMap</strong> — co-located in a single ZNode allocation. Dual-index: O(1) by-name lookups + O(log N) by-score range queries.
+      </div>
+      <div class="ds-card-expand-hint">INSPECT SOURCE</div>
+      <div class="ds-card-code"><pre><span class="kw">struct</span> <span class="type">ZSet</span> {
+    <span class="type">AVLNode</span> *root = <span class="num">NULL</span>; <span class="comment">// index by (score, name)</span>
+    <span class="type">HMap</span> hmap;            <span class="comment">// index by name</span>
+};
+
+<span class="kw">struct</span> <span class="type">ZNode</span> {
+    <span class="comment">// data structure nodes (co-located)</span>
+    <span class="type">AVLNode</span> tree;
+    <span class="type">HNode</span>   hmap;
+
+    <span class="comment">// data</span>
+    <span class="type">double</span> score = <span class="num">0</span>;
+    <span class="type">size_t</span> len   = <span class="num">0</span>;
+    <span class="type">char</span>   name[<span class="num">0</span>]; <span class="comment">// flexible array member</span>
+};
+
+<span class="type">bool</span>    <span class="fn">zsetInsert</span>(<span class="type">ZSet</span> *zset, <span class="kw">const</span> <span class="type">char</span> *name, <span class="type">size_t</span> len, <span class="type">double</span> score);
+<span class="type">ZNode</span>  *<span class="fn">zsetLookup</span>(<span class="type">ZSet</span> *zset, <span class="kw">const</span> <span class="type">char</span> *name, <span class="type">size_t</span> len);
+<span class="type">int64_t</span> <span class="fn">zsetRank</span>(<span class="type">ZSet</span> *zset, <span class="kw">const</span> <span class="type">char</span> *name, <span class="type">size_t</span> len);</pre></div>
+    </div>
+
+    <!-- HEAP -->
+    <div class="ds-card" style="--card-accent: #d8b4fe" onclick="this.classList.toggle('expanded')">
+      <div class="ds-card-header">
+        <div class="ds-card-icon">⏱</div>
+        <div>
+          <div class="ds-card-title">HEAP (TTL SCHEDULER)</div>
+          <div class="ds-card-folder">heap/</div>
+        </div>
+      </div>
+      <div class="ds-card-badges">
+        <span class="complexity-badge">PEXPIRE O(log N)</span>
+        <span class="complexity-badge">PTTL O(1)</span>
+        <span class="complexity-badge">EXPIRE CHECK O(1)</span>
+      </div>
+      <div class="ds-card-desc">
+        <strong>Intrusive Min-Heap</strong> — HeapItem.ref pointer enables O(1) position lookup. Batch-limited cleanup: max 2000 keys per event loop iteration.
+      </div>
+      <div class="ds-card-expand-hint">INSPECT SOURCE</div>
+      <div class="ds-card-code"><pre><span class="kw">struct</span> <span class="type">HeapItem</span> {
+    <span class="type">uint64_t</span> val;          <span class="comment">// expiration time (ms)</span>
+    <span class="type">size_t</span>  *ref = <span class="num">NULL</span>;   <span class="comment">// → Entry::heap_idx</span>
+};
+
+<span class="kw">void</span> <span class="fn">heapUpdate</span>(<span class="type">HeapItem</span> heap[], <span class="type">size_t</span> pos, <span class="type">size_t</span> len);
+<span class="kw">void</span> <span class="fn">heapDelete</span>(std::vector&lt;<span class="type">HeapItem</span>&gt; &amp;heap, <span class="type">size_t</span> pos);
+<span class="kw">void</span> <span class="fn">heapUpsert</span>(std::vector&lt;<span class="type">HeapItem</span>&gt; &amp;heap, <span class="type">size_t</span> pos, <span class="type">HeapItem</span> t);
+
+<span class="comment">// Server integration:</span>
+<span class="comment">// heap[0].val &lt; nowMs → key expired!</span>
+<span class="comment">// batch-limited to 2000 keys/iteration</span></pre></div>
+    </div>
+
+    <!-- THREAD POOL -->
+    <div class="ds-card" style="--card-accent: #a855f7" onclick="this.classList.toggle('expanded')">
+      <div class="ds-card-header">
+        <div class="ds-card-icon">⚙</div>
+        <div>
+          <div class="ds-card-title">THREAD POOL</div>
+          <div class="ds-card-folder">threadPool/</div>
+        </div>
+      </div>
+      <div class="ds-card-badges">
+        <span class="complexity-badge">QUEUE O(1)</span>
+        <span class="complexity-badge">DISPATCH ASYNC</span>
+        <span class="complexity-badge">SHUTDOWN GRACEFUL</span>
+      </div>
+      <div class="ds-card-desc">
+        <strong>Pthread-based async workers</strong> — offloads large ZSet deallocations (like Redis UNLINK). Mutex + condition variable signalling. Graceful shutdown flag.
+      </div>
+      <div class="ds-card-expand-hint">INSPECT SOURCE</div>
+      <div class="ds-card-code"><pre><span class="kw">struct</span> <span class="type">Work</span> {
+    <span class="kw">void</span> (*f)(<span class="kw">void</span> *) = <span class="num">NULL</span>; <span class="comment">// generic function ptr</span>
+    <span class="kw">void</span> *arg = <span class="num">NULL</span>;          <span class="comment">// generic data ptr</span>
+};
+
+<span class="kw">struct</span> <span class="type">ThreadPool</span> {
+    std::vector&lt;<span class="type">pthread_t</span>&gt; threads;
+    std::deque&lt;<span class="type">Work</span>&gt;      queue;
+    <span class="type">pthread_mutex_t</span>       mu;
+    <span class="type">pthread_cond_t</span>        not_empty;
+    <span class="type">bool</span> shutdown = <span class="num">false</span>;  <span class="comment">// graceful stop flag</span>
+};
+
+<span class="kw">void</span> <span class="fn">threadPoolInit</span>(<span class="type">ThreadPool</span> *tp, <span class="type">size_t</span> num_threads);
+<span class="kw">void</span> <span class="fn">threadPoolQueue</span>(<span class="type">ThreadPool</span> *tp, <span class="kw">void</span> (*f)(<span class="kw">void</span> *), <span class="kw">void</span> *arg);
+<span class="kw">void</span> <span class="fn">threadPoolDestroy</span>(<span class="type">ThreadPool</span> *tp);</pre></div>
+    </div>
+
+    <!-- DLIST -->
+    <div class="ds-card" style="--card-accent: #8b5cf6" onclick="this.classList.toggle('expanded')">
+      <div class="ds-card-header">
+        <div class="ds-card-icon">↔</div>
+        <div>
+          <div class="ds-card-title">DLIST (CONN TIMER)</div>
+          <div class="ds-card-folder">list/</div>
+        </div>
+      </div>
+      <div class="ds-card-badges">
+        <span class="complexity-badge">INSERT O(1)</span>
+        <span class="complexity-badge">REMOVE O(1)</span>
+        <span class="complexity-badge">IDLE CHECK O(1)</span>
+      </div>
+      <div class="ds-card-desc">
+        <strong>Intrusive circular doubly-linked list</strong> — embedded in Conn struct for O(1) idle timeout management. Dummy sentinel node pattern avoids NULL checks.
+      </div>
+      <div class="ds-card-expand-hint">INSPECT SOURCE</div>
+      <div class="ds-card-code"><pre><span class="kw">struct</span> <span class="type">DList</span> {
+    <span class="type">DList</span> *prev = <span class="num">NULL</span>;
+    <span class="type">DList</span> *next = <span class="num">NULL</span>;
+};
+
+<span class="kw">inline</span> <span class="kw">void</span> <span class="fn">dlistDetach</span>(<span class="type">DList</span> *node) {
+    node-&gt;prev-&gt;next = node-&gt;next;
+    node-&gt;next-&gt;prev = node-&gt;prev;
+}
+
+<span class="kw">inline</span> <span class="kw">void</span> <span class="fn">dlistInit</span>(<span class="type">DList</span> *node) {
+    node-&gt;prev = node-&gt;next = node; <span class="comment">// circular sentinel</span>
+}
+
+<span class="kw">inline</span> <span class="type">bool</span> <span class="fn">dlistEmpty</span>(<span class="type">DList</span> *node) {
+    <span class="kw">return</span> node-&gt;next == node;
+}
+
+<span class="kw">inline</span> <span class="kw">void</span> <span class="fn">dlistInsertBefore</span>(<span class="type">DList</span> *target, <span class="type">DList</span> *newNode) {
+    <span class="type">DList</span> *prev = target-&gt;prev;
+    prev-&gt;next = newNode;
+    newNode-&gt;prev = prev;
+    newNode-&gt;next = target;
+    target-&gt;prev = newNode;
+}</pre></div>
+    </div>
+
+  </div>
+</section>
+
+<div class="section-divider"></div>
+
+<!-- ======== TERMINAL EMULATOR ======== -->
+<section class="terminal-section" id="terminal">
+  <h2 class="section-title">// TERMINAL EMULATOR</h2>
+  <p class="section-subtitle">Simulated Redis CLI — type commands and see live responses.</p>
+
+  <div class="terminal-layout">
+    <div class="terminal-container">
+      <div class="terminal-titlebar">
+        <span class="terminal-dot red"></span>
+        <span class="terminal-dot yellow"></span>
+        <span class="terminal-dot green"></span>
+        <span style="flex:1"></span>
+        REDIS-SERVER.EXE — PORT 1234
+      </div>
+      <div class="terminal-body" id="terminalBody">
+        <div class="terminal-output-line system">Custom Redis Server v1.0 — C++ In-Memory Engine</div>
+        <div class="terminal-output-line system">Type HELP for available commands, CLEAR to reset.</div>
+        <div class="terminal-output-line system">────────────────────────────────────────────────</div>
+      </div>
+      <div style="padding: 0 1rem 1rem; border-top: 1px solid rgba(139,92,246,0.1);">
+        <div class="terminal-input-line">
+          <span class="terminal-prompt">user@redis-server:~$ </span>
+          <input class="terminal-input" id="terminalInput" type="text" autocomplete="off" autofocus spellcheck="false" placeholder="Type a command...">
+        </div>
+      </div>
+    </div>
+
+    <div class="cmd-reference">
+      <h3>COMMAND REFERENCE</h3>
+      <div class="cmd-ref-item"><div class="cmd-ref-cmd">SET key value</div><div class="cmd-ref-desc">Store a key-value pair</div></div>
+      <div class="cmd-ref-item"><div class="cmd-ref-cmd">GET key</div><div class="cmd-ref-desc">Retrieve value by key</div></div>
+      <div class="cmd-ref-item"><div class="cmd-ref-cmd">DEL key</div><div class="cmd-ref-desc">Delete a key</div></div>
+      <div class="cmd-ref-item"><div class="cmd-ref-cmd">KEYS</div><div class="cmd-ref-desc">List all stored keys</div></div>
+      <div class="cmd-ref-item"><div class="cmd-ref-cmd">ZADD zset score name</div><div class="cmd-ref-desc">Add to sorted set</div></div>
+      <div class="cmd-ref-item"><div class="cmd-ref-cmd">ZRANK zset name</div><div class="cmd-ref-desc">Get rank in sorted set</div></div>
+      <div class="cmd-ref-item"><div class="cmd-ref-cmd">ZRANGE zset min max</div><div class="cmd-ref-desc">Range query by rank</div></div>
+      <div class="cmd-ref-item"><div class="cmd-ref-cmd">ZQUERY zset sc nm off lim</div><div class="cmd-ref-desc">Score-based range query</div></div>
+      <div class="cmd-ref-item"><div class="cmd-ref-cmd">LPUSH list val [val...]</div><div class="cmd-ref-desc">Push to list head</div></div>
+      <div class="cmd-ref-item"><div class="cmd-ref-cmd">RPOP list</div><div class="cmd-ref-desc">Pop from list tail</div></div>
+      <div class="cmd-ref-item"><div class="cmd-ref-cmd">LRANGE list start stop</div><div class="cmd-ref-desc">List range slice</div></div>
+      <div class="cmd-ref-item"><div class="cmd-ref-cmd">PEXPIRE key ms</div><div class="cmd-ref-desc">Set TTL in milliseconds</div></div>
+      <div class="cmd-ref-item"><div class="cmd-ref-cmd">PTTL key</div><div class="cmd-ref-desc">Get remaining TTL (ms)</div></div>
+      <div class="cmd-ref-item"><div class="cmd-ref-cmd">PERSIST key</div><div class="cmd-ref-desc">Remove TTL from key</div></div>
+      <div class="cmd-ref-item"><div class="cmd-ref-cmd">INFO</div><div class="cmd-ref-desc">Server information</div></div>
+      <div class="cmd-ref-item"><div class="cmd-ref-cmd">HELP</div><div class="cmd-ref-desc">Show all commands</div></div>
+      <div class="cmd-ref-item"><div class="cmd-ref-cmd">CLEAR</div><div class="cmd-ref-desc">Clear terminal</div></div>
+    </div>
+  </div>
+</section>
+
+<div class="section-divider"></div>
+
+<!-- ======== EVENT LOOP VISUALIZER ======== -->
+<section class="visualizer-section" id="visualizer">
+  <h2 class="section-title">// EVENT LOOP ARCHITECTURE</h2>
+  <p class="section-subtitle">How the server handles thousands of concurrent connections in a single thread.</p>
+
+  <div class="viz-container">
+    <!-- Architecture Diagram -->
+    <div class="arch-diagram">
+      <div class="arch-col">
+        <!-- Clients -->
+        <div class="arch-label">CLIENT CONNECTIONS</div>
+        <div class="arch-row">
+          <div class="arch-box" id="viz-c1">CLIENT 1<div class="arch-box-sub">TCP fd=4</div></div>
+          <div class="arch-box" id="viz-c2">CLIENT 2<div class="arch-box-sub">TCP fd=5</div></div>
+          <div class="arch-box" id="viz-c3">CLIENT 3<div class="arch-box-sub">TCP fd=6</div></div>
+        </div>
+
+        <div class="arch-arrow down">▼ ▼ ▼</div>
+        <div class="arch-label">read/write streams</div>
+
+        <!-- Poll Core -->
+        <div class="arch-box core" id="viz-poll">
+          POLL() EVENT LOOP
+          <div class="arch-box-sub">I/O multiplexing</div>
+        </div>
+
+        <div class="arch-arrow down">▼ ▼ ▼</div>
+        <div class="arch-label">route / manage / expire</div>
+
+        <!-- Subsystems -->
+        <div class="arch-row">
+          <div class="arch-box" id="viz-cmd">
+            CMD ROUTER
+            <div class="arch-box-sub">→ HMap + ZSet</div>
+          </div>
+          <div class="arch-box" id="viz-conn">
+            CONN MGR
+            <div class="arch-box-sub">→ Idle DList</div>
+          </div>
+          <div class="arch-box" id="viz-expiry">
+            EXPIRY PROC
+            <div class="arch-box-sub">→ TTL Heap</div>
+          </div>
+        </div>
+
+        <div class="arch-arrow down">▼</div>
+        <div class="arch-label">offload large deletions</div>
+
+        <!-- Thread Pool -->
+        <div class="arch-box" id="viz-tp" style="border-color: var(--purple-300);">
+          THREAD POOL
+          <div class="arch-box-sub">async workers (UNLINK)</div>
+        </div>
+      </div>
+
+      <!-- Legend -->
+      <div class="viz-legend">
+        <div class="legend-item"><div class="legend-dot" style="border-color: var(--purple-300); background: rgba(168,85,247,0.3);"></div>Core event loop</div>
+        <div class="legend-item"><div class="legend-dot" style="border-color: var(--purple-500);"></div>Subsystem</div>
+        <div class="legend-item"><div class="legend-dot" style="border-color: var(--green-term);"></div>Client connection</div>
+        <div class="legend-item"><div class="legend-dot" style="border-color: var(--yellow-term);"></div>Background workers</div>
+      </div>
+    </div>
+
+    <!-- Timeline Panel -->
+    <div class="timeline-panel">
+      <h3>EVENT LOOP ITERATION</h3>
+
+      <div class="timeline-step" id="step-0">
+        <div class="timeline-step-num">01</div>
+        <div class="timeline-step-content">
+          <h4>nextTimerMs()</h4>
+          <p>Calculate sleep duration. Inspects TTL heap top and idle timeouts. Returns shortest deadline.</p>
+        </div>
+      </div>
+
+      <div class="timeline-step" id="step-1">
+        <div class="timeline-step-num">02</div>
+        <div class="timeline-step-content">
+          <h4>poll(fds, timeout)</h4>
+          <p>Suspend process until I/O activity or timeout. CPU-efficient — no busy-waiting.</p>
+        </div>
+      </div>
+
+      <div class="timeline-step" id="step-2">
+        <div class="timeline-step-num">03</div>
+        <div class="timeline-step-content">
+          <h4>HANDLE SOCKET I/O</h4>
+          <p>Accept new connections, read commands into buffers, write responses. Non-blocking fd mode.</p>
+        </div>
+      </div>
+
+      <div class="timeline-step" id="step-3">
+        <div class="timeline-step-num">04</div>
+        <div class="timeline-step-content">
+          <h4>processTimers()</h4>
+          <p>Expire idle connections. Purge up to 2000 expired keys from TTL heap. Offload large deletes to thread pool.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="section-divider"></div>
+
+<!-- ======== BUILD & METRICS ======== -->
+<section class="build-section" id="build">
+  <h2 class="section-title">// BUILD & DEPLOY</h2>
+  <p class="section-subtitle">Get the server running in seconds.</p>
+
+  <div class="build-grid">
+    <!-- Build Terminal -->
+    <div class="build-terminal">
+      <div class="build-terminal-header">BUILD INSTRUCTIONS</div>
+      <div class="build-terminal-body">
+<span class="comment"># Clone and build</span>
+<span class="prompt">$ </span><span class="cmd-text">git clone https://github.com/your-repo/Redis-Server.git</span>
+<span class="prompt">$ </span><span class="cmd-text">cd Redis-Server</span>
+<span class="prompt">$ </span><span class="cmd-text">make clean && make</span>
+<span class="output">g++ -Wall -Wextra -std=c++17 -O2 -I. -c server.cpp</span>
+<span class="output">g++ -Wall -Wextra -std=c++17 -O2 -I. -c helpers/helper.cpp</span>
+<span class="output">g++ -Wall -Wextra -std=c++17 -O2 -I. -c hashtable/hashtable.cpp</span>
+<span class="output">g++ -Wall -Wextra -std=c++17 -O2 -I. -c zset/zset.cpp</span>
+<span class="output">g++ -Wall -Wextra -std=c++17 -O2 -I. -c AVLtrees/avl.cpp</span>
+<span class="output">g++ -Wall -Wextra -std=c++17 -O2 -I. -c heap/heap.cpp</span>
+<span class="output">g++ -Wall -Wextra -std=c++17 -O2 -I. -c threadPool/threadPool.cpp</span>
+<span class="highlight">✓ Build complete</span>
+
+<span class="comment"># Start server</span>
+<span class="prompt">$ </span><span class="cmd-text">./server</span>
+<span class="output">Listening on port 1234...</span>
+
+<span class="comment"># In another terminal — connect client</span>
+<span class="prompt">$ </span><span class="cmd-text">./client</span>
+<span class="output">Connected to 127.0.0.1:1234</span>
+<span class="prompt">> </span><span class="cmd-text">set mykey myval</span>
+<span class="highlight">OK</span>
+<span class="prompt">> </span><span class="cmd-text">get mykey</span>
+<span class="highlight">myval</span>
+<span class="prompt">> </span><span class="cmd-text">zadd leaderboard 99.5 player1</span>
+<span class="highlight">(integer) 1</span>
+<span class="prompt">> </span><span class="cmd-text">pexpire mykey 10000</span>
+<span class="highlight">(integer) 1</span>
+      </div>
+    </div>
+
+    <!-- Metrics Panel -->
+    <div class="metrics-panel">
+      <h3>PROJECT METRICS</h3>
+
+      <div class="metric-row">
+        <div class="metric-label"><span>LINES OF CODE</span><span>~1,200</span></div>
+        <div class="metric-bar"><div class="metric-fill" data-width="75"></div></div>
+      </div>
+      <div class="metric-row">
+        <div class="metric-label"><span>DATA STRUCTURES</span><span>6 / 6</span></div>
+        <div class="metric-bar"><div class="metric-fill" data-width="100"></div></div>
+      </div>
+      <div class="metric-row">
+        <div class="metric-label"><span>COMMANDS</span><span>15+</span></div>
+        <div class="metric-bar"><div class="metric-fill" data-width="80"></div></div>
+      </div>
+      <div class="metric-row">
+        <div class="metric-label"><span>AVG LOOKUP</span><span>O(1)</span></div>
+        <div class="metric-bar"><div class="metric-fill" data-width="95"></div></div>
+      </div>
+      <div class="metric-row">
+        <div class="metric-label"><span>BUILD TIME</span><span>~2s</span></div>
+        <div class="metric-bar"><div class="metric-fill" data-width="20"></div></div>
+      </div>
+      <div class="metric-row">
+        <div class="metric-label"><span>DEPENDENCIES</span><span>0 (zero)</span></div>
+        <div class="metric-bar"><div class="metric-fill" data-width="5"></div></div>
+      </div>
+
+      <!-- File Tree -->
+      <div class="file-tree">
+        <h4>FILE STRUCTURE</h4>
+        <div class="tree-item dir"><span class="icon">📁</span> Redis-Server/</div>
+        <div class="tree-item indent-1"><span class="icon">📄</span> server.cpp</div>
+        <div class="tree-item indent-1"><span class="icon">📄</span> client.cpp</div>
+        <div class="tree-item indent-1"><span class="icon">📄</span> common.h</div>
+        <div class="tree-item indent-1"><span class="icon">📄</span> Makefile</div>
+        <div class="tree-item indent-1"><span class="icon">📄</span> CMakeLists.txt</div>
+        <div class="tree-item dir indent-1"><span class="icon">📁</span> hashtable/</div>
+        <div class="tree-item indent-2"><span class="icon">📄</span> hashtable.h / .cpp</div>
+        <div class="tree-item dir indent-1"><span class="icon">📁</span> AVLtrees/</div>
+        <div class="tree-item indent-2"><span class="icon">📄</span> avl.h / .cpp</div>
+        <div class="tree-item dir indent-1"><span class="icon">📁</span> zset/</div>
+        <div class="tree-item indent-2"><span class="icon">📄</span> zset.h / .cpp</div>
+        <div class="tree-item dir indent-1"><span class="icon">📁</span> heap/</div>
+        <div class="tree-item indent-2"><span class="icon">📄</span> heap.h / .cpp</div>
+        <div class="tree-item dir indent-1"><span class="icon">📁</span> threadPool/</div>
+        <div class="tree-item indent-2"><span class="icon">📄</span> threadPool.h / .cpp</div>
+        <div class="tree-item dir indent-1"><span class="icon">📁</span> list/</div>
+        <div class="tree-item indent-2"><span class="icon">📄</span> list.h</div>
+        <div class="tree-item dir indent-1"><span class="icon">📁</span> helpers/</div>
+        <div class="tree-item indent-2"><span class="icon">📄</span> helper.h / .cpp</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="section-divider"></div>
+
+<!-- ======== FOOTER ======== -->
+<footer class="footer">
+  <div class="footer-title">CUSTOM REDIS SERVER // BUILT FROM SCRATCH IN C++</div>
+  <div class="footer-sub">High-performance in-memory key-value store • Event-driven • Zero dependencies</div>
+  <div class="footer-blink">▶ PRESS START TO PLAY ◀</div>
+</footer>
+
+<!-- ============================================================
+     JAVASCRIPT
+     ============================================================ -->
+<script>
+/* ============================================================
+   PARTICLE CANVAS (Hero Background)
+   ============================================================ */
+(function initParticles() {
+  const canvas = document.getElementById('particleCanvas');
+  const ctx = canvas.getContext('2d');
+  let particles = [];
+  const PARTICLE_COUNT = 60;
+
+  function resize() {
+    canvas.width = canvas.offsetWidth;
+    canvas.height = canvas.offsetHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  function createParticle() {
+    return {
+      x: Math.random() * canvas.width,
+      y: canvas.height + Math.random() * 20,
+      size: Math.floor(Math.random() * 3) + 2,
+      speed: 0.3 + Math.random() * 0.8,
+      opacity: 0.1 + Math.random() * 0.4,
+      hue: 260 + Math.random() * 30
+    };
+  }
+
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    const p = createParticle();
+    p.y = Math.random() * canvas.height;
+    particles.push(p);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    particles.forEach(p => {
+      ctx.fillStyle = `hsla(${p.hue}, 70%, 65%, ${p.opacity})`;
+      ctx.fillRect(Math.floor(p.x), Math.floor(p.y), p.size, p.size);
+      p.y -= p.speed;
+      p.x += Math.sin(p.y * 0.01) * 0.3;
+      if (p.y < -10) {
+        Object.assign(p, createParticle());
+      }
+    });
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+/* ============================================================
+   SCROLL ANIMATIONS (IntersectionObserver)
+   ============================================================ */
+(function initScrollAnimations() {
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+      }
+    });
+  }, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
+
+  document.querySelectorAll('.ds-card').forEach(card => observer.observe(card));
+
+  // Metric bars animate on scroll
+  const metricObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.querySelectorAll('.metric-fill').forEach(fill => {
+          fill.style.width = fill.dataset.width + '%';
+        });
+      }
+    });
+  }, { threshold: 0.3 });
+
+  const mp = document.querySelector('.metrics-panel');
+  if (mp) metricObserver.observe(mp);
+})();
+
+/* ============================================================
+   EVENT LOOP VISUALIZER ANIMATION
+   ============================================================ */
+(function initVisualizerAnimation() {
+  const steps = [0, 1, 2, 3];
+  const vizBoxes = {
+    0: ['viz-poll'],
+    1: ['viz-poll', 'viz-c1', 'viz-c2', 'viz-c3'],
+    2: ['viz-poll', 'viz-cmd', 'viz-conn'],
+    3: ['viz-expiry', 'viz-tp']
+  };
+  let current = 0;
+
+  function animate() {
+    // Clear all
+    document.querySelectorAll('.timeline-step').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.arch-box').forEach(b => b.classList.remove('active'));
+
+    // Activate current step
+    const stepEl = document.getElementById('step-' + current);
+    if (stepEl) stepEl.classList.add('active');
+
+    (vizBoxes[current] || []).forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.add('active');
+    });
+
+    current = (current + 1) % steps.length;
+  }
+
+  animate();
+  setInterval(animate, 2500);
+})();
+
+/* ============================================================
+   TERMINAL EMULATOR
+   ============================================================ */
+(function initTerminal() {
+  // In-memory state
+  const kvStore = new Map();
+  const zsets = new Map();    // name -> [{score, member}]
+  const lists = new Map();    // name -> [items]
+  const ttls = new Map();     // key -> expireTimestamp
+
+  const commandHistory = [];
+  let historyIndex = -1;
+
+  const body = document.getElementById('terminalBody');
+  const input = document.getElementById('terminalInput');
+
+  function addLine(text, cls) {
+    const div = document.createElement('div');
+    div.className = 'terminal-output-line ' + (cls || '');
+    div.textContent = text;
+    body.appendChild(div);
+    body.scrollTop = body.scrollHeight;
+
+    // Keep max 200 lines
+    while (body.children.length > 200) body.removeChild(body.firstChild);
+  }
+
+  function addLines(lines, cls) {
+    lines.forEach(l => addLine(l, cls));
+  }
+
+  // Check and remove expired keys
+  function checkExpired(key) {
+    if (ttls.has(key) && Date.now() >= ttls.get(key)) {
+      kvStore.delete(key);
+      ttls.delete(key);
+      return true;
+    }
+    return false;
+  }
+
+  function allKeys() {
+    const keys = [];
+    for (const k of kvStore.keys()) {
+      if (!checkExpired(k)) keys.push(k);
+    }
+    return keys;
+  }
+
+  function processCommand(raw) {
+    const trimmed = raw.trim();
+    if (!trimmed) return;
+
+    addLine('user@redis-server:~$ ' + trimmed, 'cmd');
+
+    commandHistory.push(trimmed);
+    if (commandHistory.length > 50) commandHistory.shift();
+    historyIndex = commandHistory.length;
+
+    const parts = trimmed.match(/(?:[^\s"]+|"[^"]*")/g) || [];
+    const cmd = (parts[0] || '').toUpperCase();
+    const args = parts.slice(1).map(a => a.replace(/^"|"$/g, ''));
+
+    switch (cmd) {
+      case 'SET': {
+        if (args.length < 2) { addLine('(error) ERR wrong number of arguments for \'SET\' command', 'error'); break; }
+        kvStore.set(args[0], args[1]);
+        addLine('OK', 'result');
+        break;
+      }
+
+      case 'GET': {
+        if (args.length < 1) { addLine('(error) ERR wrong number of arguments for \'GET\' command', 'error'); break; }
+        if (checkExpired(args[0]) || !kvStore.has(args[0])) {
+          addLine('(nil)', 'result');
+        } else {
+          addLine('"' + kvStore.get(args[0]) + '"', 'result');
+        }
+        break;
+      }
+
+      case 'DEL': {
+        if (args.length < 1) { addLine('(error) ERR wrong number of arguments for \'DEL\' command', 'error'); break; }
+        let count = 0;
+        args.forEach(k => {
+          if (kvStore.has(k)) { kvStore.delete(k); ttls.delete(k); count++; }
+          if (zsets.has(k)) { zsets.delete(k); count++; }
+          if (lists.has(k)) { lists.delete(k); count++; }
+        });
+        addLine('(integer) ' + count, 'result');
+        break;
+      }
+
+      case 'KEYS': {
+        const keys = allKeys();
+        // Also include zset and list keys
+        for (const k of zsets.keys()) keys.push(k);
+        for (const k of lists.keys()) keys.push(k);
+        const unique = [...new Set(keys)];
+        if (unique.length === 0) {
+          addLine('(empty list or set)', 'result');
+        } else {
+          unique.forEach((k, i) => addLine((i + 1) + ') "' + k + '"', 'result'));
+        }
+        break;
+      }
+
+      case 'INFO': {
+        addLines([
+          '# Server',
+          'redis_version:1.0-custom-cpp',
+          'redis_mode:standalone',
+          'tcp_port:1234',
+          'event_loop:poll()',
+          'io_mode:non-blocking',
+          '',
+          '# Keyspace',
+          'kv_keys:' + allKeys().length,
+          'zsets:' + zsets.size,
+          'lists:' + lists.size,
+          'ttl_tracked:' + ttls.size,
+          '',
+          '# Engine',
+          'language:C++17',
+          'hash_function:FNV-1a',
+          'rehash_strategy:progressive',
+          'tree_type:intrusive_AVL',
+          'thread_pool:pthread-based',
+        ], 'info');
+        break;
+      }
+
+      case 'ZADD': {
+        if (args.length < 3) { addLine('(error) ERR wrong number of arguments for \'ZADD\' command', 'error'); break; }
+        const zname = args[0];
+        const score = parseFloat(args[1]);
+        const member = args[2];
+        if (isNaN(score)) { addLine('(error) ERR value is not a valid float', 'error'); break; }
+        if (!zsets.has(zname)) zsets.set(zname, []);
+        const zs = zsets.get(zname);
+        const existing = zs.findIndex(e => e.member === member);
+        if (existing !== -1) {
+          zs[existing].score = score;
+          addLine('(integer) 0', 'result');
+        } else {
+          zs.push({ score, member });
+          addLine('(integer) 1', 'result');
+        }
+        zs.sort((a, b) => a.score - b.score || a.member.localeCompare(b.member));
+        break;
+      }
+
+      case 'ZRANK': {
+        if (args.length < 2) { addLine('(error) ERR wrong number of arguments for \'ZRANK\' command', 'error'); break; }
+        const zs2 = zsets.get(args[0]);
+        if (!zs2) { addLine('(nil)', 'result'); break; }
+        const idx = zs2.findIndex(e => e.member === args[1]);
+        addLine(idx === -1 ? '(nil)' : '(integer) ' + idx, 'result');
+        break;
+      }
+
+      case 'ZRANGE': {
+        if (args.length < 3) { addLine('(error) ERR wrong number of arguments for \'ZRANGE\' command', 'error'); break; }
+        const zs3 = zsets.get(args[0]);
+        if (!zs3 || zs3.length === 0) { addLine('(empty list or set)', 'result'); break; }
+        let start = parseInt(args[1]), stop = parseInt(args[2]);
+        if (start < 0) start = Math.max(0, zs3.length + start);
+        if (stop < 0) stop = zs3.length + stop;
+        stop = Math.min(stop, zs3.length - 1);
+        if (start > stop) { addLine('(empty list or set)', 'result'); break; }
+        for (let i = start; i <= stop; i++) {
+          addLine((i - start + 1) + ') "' + zs3[i].member + '"', 'result');
+        }
+        break;
+      }
+
+      case 'ZQUERY': {
+        if (args.length < 5) { addLine('(error) ERR wrong number of arguments for \'ZQUERY\' command', 'error'); break; }
+        const zname2 = args[0];
+        const minScore = parseFloat(args[1]);
+        const minName = args[2];
+        const offset = parseInt(args[3]);
+        const limit = parseInt(args[4]);
+        const zs4 = zsets.get(zname2);
+        if (!zs4 || zs4.length === 0) { addLine('(empty list or set)', 'result'); break; }
+        // Find start position
+        let startIdx = zs4.findIndex(e => e.score > minScore || (e.score === minScore && e.member >= minName));
+        if (startIdx === -1) { addLine('(empty list or set)', 'result'); break; }
+        startIdx += offset;
+        const results = zs4.slice(startIdx, startIdx + limit);
+        if (results.length === 0) { addLine('(empty list or set)', 'result'); break; }
+        results.forEach((r, i) => {
+          addLine((i + 1) + ') "' + r.member + '" ' + r.score, 'result');
+        });
+        break;
+      }
+
+      case 'LPUSH': {
+        if (args.length < 2) { addLine('(error) ERR wrong number of arguments for \'LPUSH\' command', 'error'); break; }
+        const lname = args[0];
+        if (!lists.has(lname)) lists.set(lname, []);
+        const list = lists.get(lname);
+        for (let i = 1; i < args.length; i++) {
+          list.unshift(args[i]);
+        }
+        addLine('(integer) ' + list.length, 'result');
+        break;
+      }
+
+      case 'RPOP': {
+        if (args.length < 1) { addLine('(error) ERR wrong number of arguments for \'RPOP\' command', 'error'); break; }
+        const list2 = lists.get(args[0]);
+        if (!list2 || list2.length === 0) {
+          addLine('(nil)', 'result');
+        } else {
+          const val = list2.pop();
+          addLine('"' + val + '"', 'result');
+          if (list2.length === 0) lists.delete(args[0]);
+        }
+        break;
+      }
+
+      case 'LRANGE': {
+        if (args.length < 3) { addLine('(error) ERR wrong number of arguments for \'LRANGE\' command', 'error'); break; }
+        const list3 = lists.get(args[0]);
+        if (!list3 || list3.length === 0) { addLine('(empty list or set)', 'result'); break; }
+        let ls = parseInt(args[1]), le = parseInt(args[2]);
+        if (ls < 0) ls = Math.max(0, list3.length + ls);
+        if (le < 0) le = list3.length + le;
+        le = Math.min(le, list3.length - 1);
+        if (ls > le) { addLine('(empty list or set)', 'result'); break; }
+        for (let i = ls; i <= le; i++) {
+          addLine((i - ls + 1) + ') "' + list3[i] + '"', 'result');
+        }
+        break;
+      }
+
+      case 'PEXPIRE': {
+        if (args.length < 2) { addLine('(error) ERR wrong number of arguments for \'PEXPIRE\' command', 'error'); break; }
+        const ms = parseInt(args[1]);
+        if (!kvStore.has(args[0])) {
+          addLine('(integer) 0', 'result');
+        } else if (ms <= 0) {
+          kvStore.delete(args[0]);
+          ttls.delete(args[0]);
+          addLine('(integer) 1', 'result');
+        } else {
+          ttls.set(args[0], Date.now() + ms);
+          addLine('(integer) 1', 'result');
+        }
+        break;
+      }
+
+      case 'PTTL': {
+        if (args.length < 1) { addLine('(error) ERR wrong number of arguments for \'PTTL\' command', 'error'); break; }
+        if (!kvStore.has(args[0])) {
+          addLine('(integer) -2', 'result');
+        } else if (!ttls.has(args[0])) {
+          addLine('(integer) -1', 'result');
+        } else {
+          const remaining = ttls.get(args[0]) - Date.now();
+          if (remaining <= 0) {
+            kvStore.delete(args[0]); ttls.delete(args[0]);
+            addLine('(integer) -2', 'result');
+          } else {
+            addLine('(integer) ' + Math.floor(remaining), 'result');
+          }
+        }
+        break;
+      }
+
+      case 'PERSIST': {
+        if (args.length < 1) { addLine('(error) ERR wrong number of arguments for \'PERSIST\' command', 'error'); break; }
+        if (!kvStore.has(args[0]) || !ttls.has(args[0])) {
+          addLine('(integer) 0', 'result');
+        } else {
+          ttls.delete(args[0]);
+          addLine('(integer) 1', 'result');
+        }
+        break;
+      }
+
+      case 'HELP': {
+        addLines([
+          '╔══════════════════════════════════════════╗',
+          '║   REDIS SERVER COMMAND REFERENCE         ║',
+          '╠══════════════════════════════════════════╣',
+          '║ SET key value     Store key-value pair   ║',
+          '║ GET key           Retrieve by key        ║',
+          '║ DEL key [key..]   Delete keys            ║',
+          '║ KEYS              List all keys          ║',
+          '║ ZADD zs score nm  Add to sorted set      ║',
+          '║ ZRANK zset name   Get rank (0-based)     ║',
+          '║ ZRANGE zs min max Range by rank          ║',
+          '║ ZQUERY zs s n o l Score-based query      ║',
+          '║ LPUSH list v [v]  Push to list head      ║',
+          '║ RPOP list         Pop from list tail     ║',
+          '║ LRANGE list s e   Slice list range       ║',
+          '║ PEXPIRE key ms    Set TTL (milliseconds) ║',
+          '║ PTTL key          Get remaining TTL      ║',
+          '║ PERSIST key       Remove TTL             ║',
+          '║ INFO              Server info            ║',
+          '║ CLEAR             Clear terminal         ║',
+          '╚══════════════════════════════════════════╝',
+        ], 'info');
+        break;
+      }
+
+      case 'CLEAR': {
+        body.innerHTML = '';
+        addLine('Terminal cleared.', 'system');
+        break;
+      }
+
+      default: {
+        if (cmd) {
+          addLine("(error) ERR unknown command '" + cmd.toLowerCase() + "', with args beginning with: " + args.map(a => "'" + a + "'").join(' '), 'error');
+        }
+      }
+    }
+  }
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      processCommand(input.value);
+      input.value = '';
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (historyIndex > 0) {
+        historyIndex--;
+        input.value = commandHistory[historyIndex] || '';
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (historyIndex < commandHistory.length - 1) {
+        historyIndex++;
+        input.value = commandHistory[historyIndex] || '';
+      } else {
+        historyIndex = commandHistory.length;
+        input.value = '';
+      }
+    }
+  });
+
+  // Focus terminal on click
+  document.querySelector('.terminal-container').addEventListener('click', () => input.focus());
+})();
+
+/* ============================================================
+   CLOSE MOBILE NAV ON LINK CLICK
+   ============================================================ */
+document.querySelectorAll('.nav-links a').forEach(a => {
+  a.addEventListener('click', () => {
+    document.querySelector('.nav-links').classList.remove('open');
+  });
+});
+</script>
+</body>
+</html>
+
